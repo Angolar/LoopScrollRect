@@ -8,7 +8,7 @@ namespace UnityEngine.UI
     [DisallowMultipleComponent]
     public class LoopVerticalScrollRect : LoopScrollRect
     {
-        protected override float GetSize(RectTransform item)
+        protected override float GetSize(LoopScrollCell cell)
         {
             float size = contentSpacing;
             if (m_GridLayout != null)
@@ -17,7 +17,7 @@ namespace UnityEngine.UI
             }
             else
             {
-                size += LayoutUtility.GetPreferredHeight(item);
+                size += cell.Height;
             }
             return size;
         }
@@ -62,10 +62,10 @@ namespace UnityEngine.UI
 
             if (viewBounds.max.y > contentBounds.max.y)
             {
-                float size = NewItemAtStart(), totalSize = size;
+                float size = NewCellAtStart(), totalSize = size;
                 while (size > 0 && viewBounds.max.y > contentBounds.max.y + totalSize)
                 {
-                    size = NewItemAtStart();
+                    size = NewCellAtStart();
                     totalSize += size;
                 }
                 if (totalSize > 0)

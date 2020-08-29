@@ -6,6 +6,7 @@ public class ScrollIndexCallback1 : MonoBehaviour
 {
     public Image image;
 	public Text text;
+    public LayoutElement element;
 
     void ScrollCellIndex (int idx) 
     {
@@ -66,5 +67,22 @@ public class ScrollIndexCallback1 : MonoBehaviour
                 break;
         }
         return new Color(r, g, b);
+    }
+
+    private void Awake()
+    {
+        element = GetComponent<LayoutElement>();
+    }
+
+    public void OnClick()
+    {
+        StartCoroutine(Change());
+    }
+
+    private IEnumerator Change()
+    {
+        yield return new WaitForSeconds(1.0f);
+
+        element.preferredHeight += 10;
     }
 }
