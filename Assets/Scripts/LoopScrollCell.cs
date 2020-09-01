@@ -13,88 +13,92 @@
 using UnityEngine;
 using System.Collections;
 using System;
-using UnityEngine.UI;
 
-[RequireComponent(typeof(LayoutElement))]
-public class LoopScrollCell : MonoBehaviour
+
+namespace UnityEngine.UI
 {
-    public GameObject Root;
-    public LayoutElement Element;
-    public RectTransform RectTrans;
-
-    /// <summary>
-    /// Cell序号
-    /// </summary>
-    public int Index { get; set; }
-
-    /// <summary>
-    /// Cell宽度
-    /// </summary>
-    public float Width
+    [RequireComponent(typeof(LayoutElement))]
+    public abstract class LoopScrollCell : MonoBehaviour
     {
-        get
-        {
-            return Element.preferredWidth;
-        }
-        set
-        {
-            Element.preferredWidth = value;
-        }
-    }
+        public GameObject Root;
+        public LayoutElement Element;
+        public RectTransform RectTrans;
 
-    /// <summary>
-    /// Cell高度
-    /// </summary>
-    public float Height
-    {
-        get
-        {
-            return Element.preferredHeight;
-        }
-        set
-        {
-            Element.preferredHeight = value;
-        }
-    }
+        /// <summary>
+        /// Cell序号
+        /// </summary>
+        public int Index { get; set; }
 
-    /// <summary>
-    /// 逻辑控制器
-    /// </summary>
-    public ILoopScrollCellController Controller;
-
-    public static LoopScrollCell Create(int idx)
-    {
-        var go = new GameObject("Cell" + idx);
-        var obj = go.GetComponent<LoopScrollCell>();
-
-        if (obj == null)
+        public virtual LoopScrollCellLoadType LoadType
         {
-            obj = go.AddComponent<LoopScrollCell>();
+            get { return LoopScrollCellLoadType.Static; }
         }
 
-        obj.Element = go.GetComponent<LayoutElement>();
-        obj.RectTrans = go.GetComponent<RectTransform>();
-        if (obj.Element == null)
+        /// <summary>
+        /// Cell宽度
+        /// </summary>
+        public float Width
         {
-            obj.Element = go.AddComponent<LayoutElement>();
+            get
+            {
+                return Element.preferredWidth;
+            }
+            set
+            {
+                Element.preferredWidth = value;
+            }
         }
-        
-        obj.Root = go;
 
-        return obj;
-    }
+        /// <summary>
+        /// Cell高度
+        /// </summary>
+        public float Height
+        {
+            get
+            {
+                return Element.preferredHeight;
+            }
+            set
+            {
+                Element.preferredHeight = value;
+            }
+        }
 
-    public void Release()
-    {
-        //通知控制器回收
-        Controller.CellClear();
+        protected void Init()
+        {
+            Root = gameObject;
 
-        //TODO:将Cell放入池子
-    }
+            Element = gameObject.GetComponent<LayoutElement>();
+            if (Element == null)
+            {
+                Element = gameObject.AddComponent<LayoutElement>();
+            }
 
-    public void OnDestroy()
-    {
-        //通知控制器销毁
-        Controller.CellDestroy();
+            RectTrans = gameObject.GetComponent<RectTransform>();
+            if (RectTrans == null)
+            {
+                RectTrans = gameObject.AddComponent<RectTransform>();
+            }
+            RectTrans.anchorMin = Vector2.zero;
+            RectTrans.anchorMax = Vector2.one;
+            RectTrans.sizeDelta = Vector2.zero;
+            RectTrans.anchoredPosition = Vector2.zero;
+        }
+
+        public virtual void Refresh()
+        {
+
+        }
+
+        public virtual void Release()
+        {
+            //TODO:将Cell放入池子
+        }
+
+        public virtual void OnDestroy()
+        {
+            
+        }
     }
 }
+

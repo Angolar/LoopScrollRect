@@ -7,6 +7,8 @@ namespace UnityEngine.UI
     [DisallowMultipleComponent]
     public class LoopHorizontalScrollRect : LoopScrollRect
     {
+        private Vector2 m_DefaultCellSize = Vector2.zero;
+
         protected override float GetSize(LoopScrollCell cell)
         {
             float size = contentSpacing;
@@ -43,16 +45,16 @@ namespace UnityEngine.UI
             }
         }
 
-        protected override bool UpdateItems(Bounds viewBounds, Bounds contentBounds)
+        protected override bool UpdateCells(Bounds viewBounds, Bounds contentBounds)
         {
             bool changed = false;
 
             if (viewBounds.max.x > contentBounds.max.x)
             {
-                float size = NewItemAtEnd(), totalSize = size;
+                float size = NewCellAtEnd(), totalSize = size;
                 while (size > 0 && viewBounds.max.x > contentBounds.max.x + totalSize)
                 {
-                    size = NewItemAtEnd();
+                    size = NewCellAtEnd();
                     totalSize += size;
                 }
                 if (totalSize > 0)
@@ -73,10 +75,10 @@ namespace UnityEngine.UI
 
             if (viewBounds.max.x < contentBounds.max.x - threshold)
             {
-                float size = DeleteItemAtEnd(), totalSize = size;
+                float size = DeleteCellAtEnd(), totalSize = size;
                 while (size > 0 && viewBounds.max.x < contentBounds.max.x - threshold - totalSize)
                 {
-                    size = DeleteItemAtEnd();
+                    size = DeleteCellAtEnd();
                     totalSize += size;
                 }
                 if (totalSize > 0)
@@ -85,10 +87,10 @@ namespace UnityEngine.UI
 
             if (viewBounds.min.x > contentBounds.min.x + threshold)
             {
-                float size = DeleteItemAtStart(), totalSize = size;
+                float size = DeleteCellAtStart(), totalSize = size;
                 while (size > 0 && viewBounds.min.x > contentBounds.min.x + threshold + totalSize)
                 {
-                    size = DeleteItemAtStart();
+                    size = DeleteCellAtStart();
                     totalSize += size;
                 }
                 if (totalSize > 0)
@@ -96,6 +98,27 @@ namespace UnityEngine.UI
             }
 
             return changed;
+        }
+
+        protected override Vector2 GetDafaultCellSize()
+        {
+            if (m_DefaultCellSize == Vector2.zero)
+            {
+                HorizontalOrVerticalLayoutGroup layout1 = content.GetComponent<HorizontalOrVerticalLayoutGroup>();
+                if (layout1 != null)
+                {
+                    m_DefaultCellSize.x = 100;
+                    m_DefaultCellSize.y = viewRect.rect.size.y - layout1.padding.top - layout1.padding.bottom;
+                }
+
+                GridLayoutGroup layout2 = content.GetComponent<GridLayoutGroup>();
+                if (layout2 != null)
+                {
+                    m_DefaultCellSize = layout2.cellSize;
+                }
+            }
+
+            return m_DefaultCellSize;
         }
     }
 }

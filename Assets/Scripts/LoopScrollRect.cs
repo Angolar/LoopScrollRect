@@ -3,26 +3,103 @@ using UnityEngine.Events;
 using UnityEngine.EventSystems;
 using System;
 using System.Collections;
+using System.Collections.Generic;
+using SG;
+using UnityEngine.Assertions.Must;
+using System.Xml.Linq;
 
 namespace UnityEngine.UI
 {
     /// <summary>
-    /// 混动列表Item提供器代理
+    /// 滚动列表Cell加载类型
     /// </summary>
-    /// <param name="cell">Item容器</param>
-    /// <param name="idx">Item序号</param>
-    /// <returns>Item</returns>
-    public delegate LoopScrollCell LoopScrollItemProvider(LoopScrollCell cell, int idx);
+    public enum LoopScrollCellLoadType
+    {
+        /// <summary>
+        /// 静态加载
+        /// </summary>
+        Static,
+
+        /// <summary>
+        /// 动态加载
+        /// </summary>
+        Dynamic,
+    }
+
+    /// <summary>
+    /// 滚动列表Cell提供器代理
+    /// </summary>
+    /// <param name="cell">Cell容器</param>
+    /// <param name="idx">Cell序号</param>
+    /// <returns>Cell</returns>
+    public delegate LoopScrollCell LoopScrollCellProvider(LoopScrollCell cell, int idx);
+
+    /// <summary>
+    /// 滚动列表Cell中控制器类型代理
+    /// </summary>
+    /// <param name="idx">Cell序号</param>
+    /// <returns>Cell控制器的类类型</returns>
+    public delegate Type LoopScrollCellTypeProvider(int idx);
 
     [AddComponentMenu("")]
     [DisallowMultipleComponent]
     [RequireComponent(typeof(RectTransform))]
     public abstract class LoopScrollRect : UIBehaviour, IInitializePotentialDragHandler, IBeginDragHandler, IEndDragHandler, IDragHandler, IScrollHandler, ICanvasElement, ILayoutElement, ILayoutGroup
     {
-        private LoopScrollItemProvider m_ItemProvider;
+        /// <summary>
+        /// Cell提供器代理
+        /// </summary>
+        private LoopScrollCellProvider m_CellProvider;
+
+        /// <summary>
+        /// Cell控制器类型提供器
+        /// </summary>
+        private LoopScrollCellTypeProvider m_CellTypeProvider;
+
+        /// <summary>
+        /// Cell缓存
+        /// </summary>
+        private Dictionary<string, KeyValuePair<GameObject, Stack<LoopScrollCell>>> m_CacheCellDic;
+        private readonly string DefaultPoolName = "default";
+
+        /// <summary>
+        /// Cell加载类型
+        /// </summary>
+        [HideInInspector]
+        public LoopScrollCellLoadType CellLoadType;
+        /// <summary>
+        /// 静态情况下Cell源
+        /// </summary>
+        [HideInInspector]
+        public GameObject CellSource;
+
+        private RectTransform m_PoolRoot;
+        [HideInInspector]
+        public RectTransform PoolRoot
+        {
+            get
+            {
+                if (m_PoolRoot == null)
+                {
+                    var go = new GameObject("Pool");
+
+                    m_PoolRoot = go.GetComponent<RectTransform>();
+                    if (m_PoolRoot == null)
+                    {
+                        m_PoolRoot = go.AddComponent<RectTransform>();
+                    }
+                    m_PoolRoot.localPosition = new Vector3(-500, -500, -100000000);
+                    m_PoolRoot.SetParent(viewRect);
+                    m_PoolRoot.localScale = Vector3.one;
+                    go.SetActive(false);
+                }
+
+                return m_PoolRoot;
+            }
+        }
 
         [Tooltip("Total count, negative means INFINITE mode")]
-        public int totalCount;
+        public int Count;
 
         protected float threshold = 0;
         [Tooltip("Reverse direction for dragging")]
@@ -30,8 +107,8 @@ namespace UnityEngine.UI
         [Tooltip("Rubber scale for outside")]
         public float rubberScale = 1;
 
-        protected int itemTypeStart = 0;
-        protected int itemTypeEnd = 0;
+        protected int cellTypeStart = 0;
+        protected int cellTypeEnd = 0;
 
         #region 子类实现
         /// <summary>
@@ -43,6 +120,7 @@ namespace UnityEngine.UI
         /// 获取容器移动向量
         /// </summary>
         protected abstract Vector2 GetVector(float value);
+        protected abstract Vector2 GetDafaultCellSize();
         #endregion
 
         protected int directionSign = 0;
@@ -106,7 +184,7 @@ namespace UnityEngine.UI
         {
             get
             {
-                return Mathf.CeilToInt((float)(itemTypeStart) / contentConstraintCount);
+                return Mathf.CeilToInt((float)(cellTypeStart) / contentConstraintCount);
             }
         }
 
@@ -115,7 +193,7 @@ namespace UnityEngine.UI
         {
             get
             {
-                return Mathf.CeilToInt((float)(itemTypeEnd - itemTypeStart) / contentConstraintCount);
+                return Mathf.CeilToInt((float)(cellTypeEnd - cellTypeStart) / contentConstraintCount);
             }
         }
 
@@ -124,11 +202,11 @@ namespace UnityEngine.UI
         {
             get
             {
-                return Mathf.CeilToInt((float)(totalCount) / contentConstraintCount);
+                return Mathf.CeilToInt((float)(Count) / contentConstraintCount);
             }
         }
 
-        protected virtual bool UpdateItems(Bounds viewBounds, Bounds contentBounds) { return false; }
+        protected virtual bool UpdateCells(Bounds viewBounds, Bounds contentBounds) { return false; }
         //==========LoopScrollRect==========
 
         public enum MovementType
@@ -266,7 +344,7 @@ namespace UnityEngine.UI
         private Vector2 m_Velocity;
         public Vector2 velocity { get { return m_Velocity; } set { m_Velocity = value; } }
 
-        private bool m_Dragging;
+        protected bool m_Dragging;
 
         private Vector2 m_PrevPosition = Vector2.zero;
         private Bounds m_PrevContentBounds;
@@ -297,18 +375,28 @@ namespace UnityEngine.UI
         private DrivenRectTransformTracker m_Tracker;
 
         /// <summary>
-        /// Item提供器代理
+        /// Cell提供器代理
         /// </summary>
-        public LoopScrollItemProvider ItemProvider
+        public LoopScrollCellProvider CellProvider
         {
-            get { return m_ItemProvider; }
-            set { m_ItemProvider = value; }
+            get { return m_CellProvider; }
+            set { m_CellProvider = value; }
+        }
+
+        /// <summary>
+        /// Cell控制器类型提供器
+        /// </summary>
+        public LoopScrollCellTypeProvider CellTypeProvider
+        {
+            get { return m_CellTypeProvider; }
+            set { m_CellTypeProvider = value; }
         }
 
 
         protected LoopScrollRect()
         {
             flexibleWidth = -1;
+            m_CacheCellDic = new Dictionary<string, KeyValuePair<GameObject, Stack<LoopScrollCell>>>();
         }
 
         //==========LoopScrollRect==========
@@ -317,20 +405,20 @@ namespace UnityEngine.UI
         {
             if (Application.isPlaying)
             {
-                itemTypeStart = 0;
-                itemTypeEnd = 0;
-                totalCount = 0;
+                cellTypeStart = 0;
+                cellTypeEnd = 0;
+                Count = 0;
                 for (int i = content.childCount - 1; i >= 0; i--)
                 {
                     var cell = content.GetChild(i).GetComponent<LoopScrollCell>();
-                    cell.Release();
+                    ReleaseCell(cell);
                 }
             }
         }
 
         public void SrollToCell(int index, float speed)
         {
-            if(totalCount >= 0 && (index < 0 || index >= totalCount))
+            if(Count >= 0 && (index < 0 || index >= Count))
             {
                 Debug.LogWarningFormat("invalid index {0}", index);
                 return;
@@ -353,42 +441,42 @@ namespace UnityEngine.UI
                 if(!m_Dragging)
                 {
                     float move = 0;
-                    if(index < itemTypeStart)
+                    if(index < cellTypeStart)
                     {
                         move = -Time.deltaTime * speed;
                     }
-                    else if(index >= itemTypeEnd)
+                    else if(index >= cellTypeEnd)
                     {
                         move = Time.deltaTime * speed;
                     }
                     else
                     {
                         m_ViewBounds = new Bounds(viewRect.rect.center, viewRect.rect.size);
-                        var m_ItemBounds = GetBounds4Item(index);
+                        var m_CellBounds = GetBounds4Cell(index);
                         var offset = 0.0f;
                         if (directionSign == -1)
-                            offset = reverseDirection ? (m_ViewBounds.min.y - m_ItemBounds.min.y) : (m_ViewBounds.max.y - m_ItemBounds.max.y);
+                            offset = reverseDirection ? (m_ViewBounds.min.y - m_CellBounds.min.y) : (m_ViewBounds.max.y - m_CellBounds.max.y);
                         else if (directionSign == 1)
-                            offset = reverseDirection ? (m_ItemBounds.max.x - m_ViewBounds.max.x) : (m_ItemBounds.min.x - m_ViewBounds.min.x);
+                            offset = reverseDirection ? (m_CellBounds.max.x - m_ViewBounds.max.x) : (m_CellBounds.min.x - m_ViewBounds.min.x);
                         // check if we cannot move on
-                        if (totalCount >= 0)
+                        if (Count >= 0)
                         {
-                            if (offset > 0 && itemTypeEnd == totalCount && !reverseDirection)
+                            if (offset > 0 && cellTypeEnd == Count && !reverseDirection)
                             {
-                                m_ItemBounds = GetBounds4Item(totalCount - 1);
+                                m_CellBounds = GetBounds4Cell(Count - 1);
                                 // reach bottom
-                                if ((directionSign == -1 && m_ItemBounds.min.y > m_ViewBounds.min.y) ||
-                                    (directionSign == 1 && m_ItemBounds.max.x < m_ViewBounds.max.x))
+                                if ((directionSign == -1 && m_CellBounds.min.y > m_ViewBounds.min.y) ||
+                                    (directionSign == 1 && m_CellBounds.max.x < m_ViewBounds.max.x))
                                 {
                                     needMoving = false;
                                     break;
                                 }
                             }
-                            else if (offset < 0 && itemTypeStart == 0 && reverseDirection)
+                            else if (offset < 0 && cellTypeStart == 0 && reverseDirection)
                             {
-                                m_ItemBounds = GetBounds4Item(0);
-                                if ((directionSign == -1 && m_ItemBounds.max.y < m_ViewBounds.max.y) ||
-                                    (directionSign == 1 && m_ItemBounds.min.x > m_ViewBounds.min.x))
+                                m_CellBounds = GetBounds4Cell(0);
+                                if ((directionSign == -1 && m_CellBounds.max.y < m_ViewBounds.max.y) ||
+                                    (directionSign == 1 && m_CellBounds.min.x > m_ViewBounds.min.x))
                                 {
                                     needMoving = false;
                                     break;
@@ -418,22 +506,28 @@ namespace UnityEngine.UI
             UpdatePrevData();
         }
 
+        /// <summary>
+        /// 数据刷新，Cell不变
+        /// </summary>
         public void RefreshCells()
         {
             if (Application.isPlaying && this.isActiveAndEnabled)
             {
-                itemTypeEnd = itemTypeStart;
-                // recycle items if we can
+                cellTypeEnd = cellTypeStart;
+                // recycle cells if we can
                 for (int i = 0; i < content.childCount; i++)
                 {
-                    if (itemTypeEnd < totalCount)
+                    var cell = content.GetChild(i).GetComponent<LoopScrollCell>();
+
+                    if (cellTypeEnd < Count)
                     {
-                        dataSource.ProvideData(content.GetChild(i), itemTypeEnd);
-                        itemTypeEnd++;
+                        CellProvider?.Invoke(cell, cellTypeEnd);
+                       
+                        cellTypeEnd++;
                     }
                     else
                     {
-                        prefabSource.ReturnObject(content.GetChild(i));
+                        cell.Release();
                         i--;
                     }
                 }
@@ -442,19 +536,20 @@ namespace UnityEngine.UI
 
         public void RefillCellsFromEnd(int offset = 0)
         {
-            if (!Application.isPlaying || prefabSource == null)
+            if (!Application.isPlaying || CellProvider == null || (CellLoadType == LoopScrollCellLoadType.Dynamic && CellTypeProvider == null))
                 return;
             
             StopMovement();
-            itemTypeEnd = reverseDirection ? offset : totalCount - offset;
-            itemTypeStart = itemTypeEnd;
+            cellTypeEnd = reverseDirection ? offset : Count - offset;
+            cellTypeStart = cellTypeEnd;
 
-            if (totalCount >= 0 && itemTypeStart % contentConstraintCount != 0)
-                Debug.LogWarning("Grid will become strange since we can't fill items in the last line");
+            if (Count >= 0 && cellTypeStart % contentConstraintCount != 0)
+                Debug.LogWarning("Grid will become strange since we can't fill cells in the last line");
 
             for (int i = m_Content.childCount - 1; i >= 0; i--)
             {
-                prefabSource.ReturnObject(m_Content.GetChild(i));
+                var cell = m_Content.GetChild(i).GetComponent<LoopScrollCell>();
+                ReleaseCell(cell);
             }
 
             float sizeToFill = 0, sizeFilled = 0;
@@ -465,7 +560,7 @@ namespace UnityEngine.UI
             
             while(sizeToFill > sizeFilled)
             {
-                float size = reverseDirection ? NewItemAtEnd() : NewCellAtStart();
+                float size = reverseDirection ? NewCellAtEnd() : NewCellAtStart();
                 if(size <= 0) break;
                 sizeFilled += size;
             }
@@ -483,20 +578,21 @@ namespace UnityEngine.UI
 
         public void RefillCells(int offset = 0, bool fillViewRect = false)
         {
-            if (!Application.isPlaying || prefabSource == null)
+            if (!Application.isPlaying || CellProvider == null || (CellLoadType == LoopScrollCellLoadType.Dynamic && CellTypeProvider == null))
                 return;
 
             StopMovement();
-            itemTypeStart = reverseDirection ? totalCount - offset : offset;
-            itemTypeEnd = itemTypeStart;
+            cellTypeStart = reverseDirection ? Count - offset : offset;
+            cellTypeEnd = cellTypeStart;
 
-            if (totalCount >= 0 && itemTypeStart % contentConstraintCount != 0)
-                Debug.LogWarning("Grid will become strange since we can't fill items in the first line");
+            if (Count >= 0 && cellTypeStart % contentConstraintCount != 0)
+                Debug.LogWarning("Grid will become strange since we can't fill cells in the first line");
 
-            // Don't `Canvas.ForceUpdateCanvases();` here, or it will new/delete cells to change itemTypeStart/End
+            // Don't `Canvas.ForceUpdateCanvases();` here, or it will new/delete cells to change cellTypeStart/End
             for (int i = m_Content.childCount - 1; i >= 0; i--)
             {
-                prefabSource.ReturnObject(m_Content.GetChild(i));
+                var cell = m_Content.GetChild(i).GetComponent<LoopScrollCell>();
+                ReleaseCell(cell);
             }
 
             float sizeToFill = 0, sizeFilled = 0;
@@ -506,20 +602,20 @@ namespace UnityEngine.UI
             else
                 sizeToFill = viewRect.rect.size.x;
 
-            float itemSize = 0;
+            float cellSize = 0;
 
             while (sizeToFill > sizeFilled)
             {
-                float size = reverseDirection ? NewCellAtStart() : NewItemAtEnd();
+                float size = reverseDirection ? NewCellAtStart() : NewCellAtEnd();
                 if(size <= 0) break;
-                else itemSize = size;
+                else cellSize = size;
                 sizeFilled += size;
             }
 
-            if (fillViewRect && itemSize > 0 && sizeFilled < sizeToFill)
+            if (fillViewRect && cellSize > 0 && sizeFilled < sizeToFill)
             {
-                int itemsToAddCount = (int)((sizeToFill - sizeFilled) / itemSize);        //calculate how many items can be added above the offset, so it still is visible in the view
-                int newOffset = offset - itemsToAddCount;
+                int cellsToAddCount = (int)((sizeToFill - sizeFilled) / cellSize);        //calculate how many cells can be added above the offset, so it still is visible in the view
+                int newOffset = offset - cellsToAddCount;
                 if (newOffset < 0) newOffset = 0;
                 if (newOffset != offset) RefillCells(newOffset);                 //refill again, with the new offset value, and now with fillViewRect disabled.
             }
@@ -538,19 +634,20 @@ namespace UnityEngine.UI
         /// <returns>新增Cell的大小(宽度或高度)</returns>
         protected float NewCellAtStart()
         {
-            if (totalCount >= 0 && itemTypeStart - contentConstraintCount < 0)
+            if (Count >= 0 && cellTypeStart - contentConstraintCount < 0)
             {
                 return 0;
             }
             float size = 0;
             for (int i = 0; i < contentConstraintCount; i++)
             {
-                itemTypeStart--;
-                RectTransform newItem = InstantiateNextItem(itemTypeStart);
-                newItem.SetAsFirstSibling();
-                size = Mathf.Max(GetSize(newItem), size);
+                cellTypeStart--;
+                LoopScrollCell newCell = InstantiateNextCell(cellTypeStart);
+                newCell.RectTrans.SetAsFirstSibling();
+                size = Mathf.Max(GetSize(newCell), size);
             }
-            threshold = Mathf.Max(threshold, size * 1.5f);
+            //threshold = Mathf.Max(threshold, size * 1.5f);
+            threshold = size * 1.5f;
 
             if (!reverseDirection)
             {
@@ -567,10 +664,10 @@ namespace UnityEngine.UI
         /// 开始位置删除一个Cell
         /// </summary>
         /// <returns>删除Cell的大小(宽度或高度)</returns>
-        protected float DeleteItemAtStart()
+        protected float DeleteCellAtStart()
         {
             // 特殊情况:当移动或拖动时，已经移动结束，不能简单的删除开始位置Cell
-            if (((m_Dragging || m_Velocity != Vector2.zero) && totalCount >= 0 && itemTypeEnd >= totalCount - 1) 
+            if (((m_Dragging || m_Velocity != Vector2.zero) && Count >= 0 && cellTypeEnd >= Count - 1) 
                 || content.childCount == 0)
             {
                 return 0;
@@ -579,11 +676,11 @@ namespace UnityEngine.UI
             float size = 0;
             for (int i = 0; i < contentConstraintCount; i++)
             {
-                RectTransform oldItem = content.GetChild(0) as RectTransform;
-                size = Mathf.Max(GetSize(oldItem), size);
-                prefabSource.ReturnObject(oldItem);
+                LoopScrollCell oldCell = content.GetChild(0).GetComponent<LoopScrollCell>();
+                size = Mathf.Max(GetSize(oldCell), size);
+                ReleaseCell(oldCell);
 
-                itemTypeStart++;
+                cellTypeStart++;
 
                 if (content.childCount == 0)
                 {
@@ -605,9 +702,9 @@ namespace UnityEngine.UI
         /// 结尾位置新增一个Cell
         /// </summary>
         /// <returns>新增Cell的大小(宽度或高度)</returns>
-        protected float NewItemAtEnd()
+        protected float NewCellAtEnd()
         {
-            if (totalCount >= 0 && itemTypeEnd >= totalCount)
+            if (Count >= 0 && cellTypeEnd >= Count)
             {
                 return 0;
             }
@@ -616,15 +713,16 @@ namespace UnityEngine.UI
             int count = contentConstraintCount - (content.childCount % contentConstraintCount);
             for (int i = 0; i < count; i++)
             {
-                RectTransform newItem = InstantiateNextItem(itemTypeEnd);
-                size = Mathf.Max(GetSize(newItem), size);
-                itemTypeEnd++;
-                if (totalCount >= 0 && itemTypeEnd >= totalCount)
+                LoopScrollCell newCell = InstantiateNextCell(cellTypeEnd);
+                size = Mathf.Max(GetSize(newCell), size);
+                cellTypeEnd++;
+                if (Count >= 0 && cellTypeEnd >= Count)
                 {
                     break;
                 }
             }
-            threshold = Mathf.Max(threshold, size * 1.5f);
+            //threshold = Mathf.Max(threshold, size * 1.5f);
+            threshold = size * 1.5f;
 
             if (reverseDirection)
             {
@@ -641,9 +739,9 @@ namespace UnityEngine.UI
         /// 结尾位置删除一个Cell
         /// </summary>
         /// <returns>删除Cell的大小(宽度或高度)</returns>
-        protected float DeleteItemAtEnd()
+        protected float DeleteCellAtEnd()
         {
-            if (((m_Dragging || m_Velocity != Vector2.zero) && totalCount >= 0 && itemTypeStart < contentConstraintCount) 
+            if (((m_Dragging || m_Velocity != Vector2.zero) && Count >= 0 && cellTypeStart < contentConstraintCount) 
                 || content.childCount == 0)
             {
                 return 0;
@@ -655,10 +753,10 @@ namespace UnityEngine.UI
                 LoopScrollCell oldCell = content.GetChild(content.childCount - 1).GetComponent<LoopScrollCell>();
                 size = Mathf.Max(GetSize(oldCell), size);
 
-                oldCell.Release();
+                ReleaseCell(oldCell);
                 
-                itemTypeEnd--;
-                if (itemTypeEnd % contentConstraintCount == 0 || content.childCount == 0)
+                cellTypeEnd--;
+                if (cellTypeEnd % contentConstraintCount == 0 || content.childCount == 0)
                 {
                     break;  //just delete the whole row
                 }
@@ -674,16 +772,27 @@ namespace UnityEngine.UI
             return size;
         }
 
-        private LoopScrollCell InstantiateNextItem(int itemIdx)
+        private LoopScrollCell InstantiateNextCell(int cellIdx)
         {
-            //获取一个新Cell
-            LoopScrollCell cell = LoopScrollCell.Create(itemIdx);
+            LoopScrollCell cell = null;
+            if (CellLoadType == LoopScrollCellLoadType.Static)
+            {   // 静态加载
+                cell = PopCell(null, cellIdx);
+            }
+            else
+            {   // 动态加载
+                Type type = CellTypeProvider.Invoke(cellIdx);
 
-            cell.RectTrans.SetParent(content, false);
-            cell.gameObject.SetActive(true);
+                //获取一个新Cell
+                cell = PopCell(type, cellIdx);
+            }
 
             // 调用Cell提供器处理内容初始化
-            ItemProvider.Invoke(cell, itemIdx);
+            CellProvider?.Invoke(cell, cellIdx);
+
+            cell.RectTrans.SetParent(content, false);
+            cell.RectTrans.localScale = Vector3.one;
+            cell.gameObject.SetActive(true);
             
             return cell;
         }
@@ -964,7 +1073,7 @@ namespace UnityEngine.UI
             if (m_HorizontalScrollbar)
             {
                 //==========LoopScrollRect==========
-                if (m_ContentBounds.size.x > 0 && totalCount > 0)
+                if (m_ContentBounds.size.x > 0 && Count > 0)
                 {
                     m_HorizontalScrollbar.size = Mathf.Clamp01((m_ViewBounds.size.x - Mathf.Abs(offset.x)) / m_ContentBounds.size.x * CurrentLines / TotalLines);
                 }
@@ -978,7 +1087,7 @@ namespace UnityEngine.UI
             if (m_VerticalScrollbar)
             {
                 //==========LoopScrollRect==========
-                if (m_ContentBounds.size.y > 0 && totalCount > 0)
+                if (m_ContentBounds.size.y > 0 && Count > 0)
                 {
                     m_VerticalScrollbar.size = Mathf.Clamp01((m_ViewBounds.size.y - Mathf.Abs(offset.y)) / m_ContentBounds.size.y * CurrentLines / TotalLines);
                 }
@@ -1009,7 +1118,7 @@ namespace UnityEngine.UI
             {
                 UpdateBounds();
                 //==========LoopScrollRect==========
-                if(totalCount > 0 && itemTypeEnd > itemTypeStart)
+                if(Count > 0 && cellTypeEnd > cellTypeStart)
                 {
                     //TODO: consider contentSpacing
                     float elementSize = m_ContentBounds.size.x / CurrentLines;
@@ -1036,7 +1145,7 @@ namespace UnityEngine.UI
             {
                 UpdateBounds();
                 //==========LoopScrollRect==========
-                if(totalCount > 0 && itemTypeEnd > itemTypeStart)
+                if(Count > 0 && cellTypeEnd > cellTypeStart)
                 {
                     //TODO: consider contentSpacinge
                     float elementSize = m_ContentBounds.size.y / CurrentLines;
@@ -1063,7 +1172,7 @@ namespace UnityEngine.UI
         private void SetNormalizedPosition(float value, int axis)
         {
             //==========LoopScrollRect==========
-            if (totalCount <= 0 || itemTypeEnd <= itemTypeStart)
+            if (Count <= 0 || cellTypeEnd <= cellTypeStart)
                 return;
             //==========LoopScrollRect==========
 
@@ -1245,7 +1354,7 @@ namespace UnityEngine.UI
             }
         }
 
-        private void UpdateBounds(bool updateItems = false)
+        private void UpdateBounds(bool updateCells = false)
         {
             m_ViewBounds = new Bounds(viewRect.rect.center, viewRect.rect.size);
             m_ContentBounds = GetBounds();
@@ -1255,7 +1364,7 @@ namespace UnityEngine.UI
 
             // ============LoopScrollRect============
             // Don't do this in Rebuild
-            if (Application.isPlaying && updateItems && UpdateItems(m_ViewBounds, m_ContentBounds))
+            if (Application.isPlaying && updateCells && UpdateCells(m_ViewBounds, m_ContentBounds))
             {
                 Canvas.ForceUpdateCanvases();
                 m_ContentBounds = GetBounds();
@@ -1310,7 +1419,7 @@ namespace UnityEngine.UI
             return bounds;
         }
 
-        private Bounds GetBounds4Item(int index)
+        private Bounds GetBounds4Cell(int index)
         {
             if (m_Content == null)
                 return new Bounds();
@@ -1319,7 +1428,7 @@ namespace UnityEngine.UI
             var vMax = new Vector3(float.MinValue, float.MinValue, float.MinValue);
 
             var toLocal = viewRect.worldToLocalMatrix;
-            int offset = index - itemTypeStart;
+            int offset = index - cellTypeStart;
             if (offset < 0 || offset >= m_Content.childCount)
                 return new Bounds();
             var rt = m_Content.GetChild(offset) as RectTransform;
@@ -1345,11 +1454,11 @@ namespace UnityEngine.UI
                 return offset;
             if (m_MovementType == MovementType.Clamped)
             {
-                if (totalCount < 0)
+                if (Count < 0)
                     return offset;
-                if (GetDimension(delta) < 0 && itemTypeStart > 0)
+                if (GetDimension(delta) < 0 && cellTypeStart > 0)
                     return offset;
-                if (GetDimension(delta) > 0 && itemTypeEnd < totalCount)
+                if (GetDimension(delta) > 0 && cellTypeEnd < Count)
                     return offset;
             }
 
@@ -1402,5 +1511,77 @@ namespace UnityEngine.UI
             SetDirtyCaching();
         }
 #endif
+
+        #region 缓存
+        protected LoopScrollCell PopCell(Type type, int idx)
+        {
+            var key = type == null ? DefaultPoolName : type.Name;
+
+            LoopScrollCell cell = null;
+            if (m_CacheCellDic.ContainsKey(key))
+            {
+                if (m_CacheCellDic[key].Value.Count > 0)
+                {
+                    return m_CacheCellDic[key].Value.Pop();
+                }
+            }
+
+            if (CellLoadType == LoopScrollCellLoadType.Dynamic)
+            {   // 动态加载
+                cell = LoopScrollDynamicCell.Create(idx);
+
+                var size = GetDafaultCellSize();
+                cell.Width = size.x;
+                cell.Height = size.y;
+            }
+            else
+            {   // 静态加载
+                cell = LoopScrollStaticCell.Create(CellSource, idx);
+            }
+
+            return cell;
+        }
+
+        protected void ReleaseCell(LoopScrollCell cell)
+        {
+            if (cell.LoadType == LoopScrollCellLoadType.Dynamic)
+            {
+                var dynamicCell = cell as LoopScrollDynamicCell;
+                Type type = dynamicCell.Controller.GetType();
+
+                if (!m_CacheCellDic.ContainsKey(type.Name))
+                {
+                    var poolGO = new GameObject("Pool-" + type.Name);
+                    var rectTrans = poolGO.AddComponent<RectTransform>();
+                    rectTrans.SetParent(PoolRoot);
+                    rectTrans.localScale = Vector3.one;
+
+                    m_CacheCellDic[type.Name] = new KeyValuePair<GameObject, Stack<LoopScrollCell>>(poolGO, new Stack<LoopScrollCell>());
+                }
+
+                cell.Release();
+
+                cell.RectTrans.SetParent(m_CacheCellDic[type.Name].Key.transform);
+
+                m_CacheCellDic[type.Name].Value.Push(cell);
+            }
+            else
+            {
+                if (!m_CacheCellDic.ContainsKey(DefaultPoolName))
+                {
+                    var poolGO = new GameObject("Pool-" + DefaultPoolName);
+                    var rectTrans = poolGO.AddComponent<RectTransform>();
+                    rectTrans.SetParent(PoolRoot);
+                    rectTrans.localScale = Vector3.one;
+
+                    m_CacheCellDic[DefaultPoolName] = new KeyValuePair<GameObject, Stack<LoopScrollCell>>(poolGO, new Stack<LoopScrollCell>());
+                }
+
+                cell.RectTrans.SetParent(m_CacheCellDic[DefaultPoolName].Key.transform);
+
+                m_CacheCellDic[DefaultPoolName].Value.Push(cell);
+            }
+        }
+        #endregion
     }
 }

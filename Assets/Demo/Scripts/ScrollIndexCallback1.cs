@@ -2,13 +2,13 @@
 using UnityEngine.UI;
 using System.Collections;
 
-public class ScrollIndexCallback1 : MonoBehaviour 
+public class ScrollIndexCallback1 : MonoBehaviour , ILoopScrollCellController
 {
     public Image image;
 	public Text text;
     public LayoutElement element;
 
-    void ScrollCellIndex (int idx) 
+    public void ScrollCellIndex (int idx) 
     {
 		string name = "Cell " + idx.ToString ();
 		if (text != null) 
@@ -84,5 +84,15 @@ public class ScrollIndexCallback1 : MonoBehaviour
         yield return new WaitForSeconds(1.0f);
 
         element.preferredHeight += 10;
+    }
+
+    public void CellClear()
+    {
+        Debug.Log("Cell Clear");
+    }
+
+    public void CellDestroy()
+    {
+        Debug.Log("Cell Destroy");
     }
 }

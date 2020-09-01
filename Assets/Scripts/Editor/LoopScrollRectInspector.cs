@@ -9,10 +9,17 @@ public class LoopScrollRectInspector : Editor
     float speed = 1000;
 	public override void OnInspectorGUI ()
     {
+        LoopScrollRect scroll = (LoopScrollRect)target;
+
+        scroll.CellLoadType = (LoopScrollCellLoadType)EditorGUILayout.EnumPopup("CellLoadType", scroll.CellLoadType);
+        if (scroll.CellLoadType == LoopScrollCellLoadType.Static)
+        {
+            scroll.CellSource = (GameObject)EditorGUILayout.ObjectField("DefaultCellPrefab", scroll.CellSource, typeof(GameObject), true);
+        }
+
         base.OnInspectorGUI();
         EditorGUILayout.Space();
 
-        LoopScrollRect scroll = (LoopScrollRect)target;
         GUI.enabled = Application.isPlaying;
 
         EditorGUILayout.BeginHorizontal();
